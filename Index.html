@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Check-In Utility</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    /*
+     * Palette — named colors only, no hex values.
+     * Base:    white, black, lightgray, darkgray, gray
+     * Signal:  green  (success), orange (duplicate/warning), red (error)
+     */
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: monospace;
+      background-color: lightgray;
+      color: black;
+      margin: 0;
+      padding: 2rem 1rem;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    .card {
+      background-color: white;
+      border: 1px solid gray;
+      width: 100%;
+      max-width: 420px;
+      padding: 1.5rem;
+      align-self: flex-start;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      border-bottom: 1px solid lightgray;
+      padding-bottom: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .header h2 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: bold;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    #sys-status {
+      font-size: 0.78rem;
+      color: gray;
+    }
+
+    #sys-status.online  { color: green; }
+    #sys-status.syncing { color: orange; }
+    #sys-status.offline { color: red; }
+
+    /* ── Form elements ── */
+    .field {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 1.1rem;
+    }
+
+    label {
+      font-size: 0.78rem;
+      color: darkgray;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.35rem;
+    }
+
+    input[type="text"],
+    select {
+      padding: 0.6rem 0.75rem;
+      font-size: 0.95rem;
+      font-family: monospace;
+      border: 1px solid gray;
+      background-color: white;
+      color: black;
+      width: 100%;
+    }
+
+    /* Only the Roll Number field is forced uppercase — event names and checkpoint keep their case */
+    #roll-input { text-transform: uppercase; }
+
+    input[type="text"]:focus,
+    select:focus {
+      outline: 2px solid black;
+      outline-offset: -2px;
+    }
+
+    input[type="text"]:disabled {
+      background-color: lightgray;
+      color: darkgray;
+      cursor: not-allowed;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 0.7rem 1rem;
+      font-size: 0.9rem;
+      font-family: monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border: none;
+      cursor: pointer;
+      margin-bottom: 0.75rem;
+    }
+
+    .btn-primary {
+      background-color: black;
+      color: white;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background-color: darkgray;
+    }
+
+    .btn-secondary {
+      background-color: gray;
+      color: white;
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background-color: darkgray;
+    }
+
+    .btn:disabled {
+      background-color: lightgray;
+      color: gray;
+      cursor: not-allowed;
+    }
+
+    /* ── Context panel (shown after session starts) ── */
+    .context-panel {
+      border: 1px solid black;
+      padding: 0.65rem 0.85rem;
+      margin-bottom: 1rem;
+      font-size: 0.82rem;
+      line-height: 1.7;
+    }
+
+    .context-panel span { display: block; }
+
+    /* ── Stats row ── */
+    .stats-row {
+      display: flex;
+      border: 1px solid lightgray;
+      margin-bottom: 1rem;
+      text-align: center;
+      font-size: 0.78rem;
+    }
+
+    .stat {
+      flex: 1;
+      padding: 0.5rem 0.25rem;
+      border-right: 1px solid lightgray;
+    }
+
+    .stat:last-child { border-right: none; }
+
+    .stat-label { display: block; color: darkgray; text-transform: uppercase; margin-bottom: 0.2rem; }
+    .stat-value { display: block; font-size: 1.1rem; font-weight: bold; }
+
+    .stat-value.green  { color: green; }
+    .stat-value.orange { color: orange; }
+    .stat-value.red    { color: red; }
+
+    /* ── Camera ── */
+    #qr-reader {
+      width: 100%;
+      border: 1px solid gray;
+      margin-bottom: 0.75rem;
+      display: none; /* toggled by JS */
+    }
+
+    /* ── Feedback box ── */
+    .feedback {
+      padding: 0.85rem 1rem;
+      font-size: 0.9rem;
+      font-weight: bold;
+      text-align: center;
+      border: 2px solid gray;
+      margin-bottom: 1rem;
+      display: none; /* toggled by JS */
+    }
+
+    .feedback.success { border-color: green;  color: green; }
+    .feedback.warning { border-color: orange; color: orange; }
+    .feedback.error   { border-color: red;    color: red; }
+    .feedback.neutral { border-color: gray;   color: black; }
+
+    /* ── Recent check-ins ── */
+    .recent {
+      border-top: 1px solid lightgray;
+      padding-top: 0.85rem;
+      margin-top: 1.25rem;
+    }
+
+    .recent-label {
+      font-size: 0.75rem;
+      color: darkgray;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    .recent-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      font-size: 0.88rem;
+    }
+
+    .recent-list li {
+      padding: 0.35rem 0;
+      border-bottom: 1px solid lightgray;
+      color: black;
+    }
+
+    .recent-list li:last-child { border-bottom: none; }
+
+    /* ── Reset link ── */
+    .reset-link {
+      display: block;
+      text-align: center;
+      margin-top: 1.5rem;
+      font-size: 0.8rem;
+      color: darkgray;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .reset-link:hover { color: black; }
+  </style>
+</head>
+<body>
+<div class="card">
+
+  <!-- Header -->
+  <div class="header">
+    <h2>Check-In</h2>
+    <span id="sys-status" class="online">● Online</span>
+  </div>
+
+  <!-- ===== SETUP VIEW ===== -->
+  <div id="setup-view">
+
+    <div class="field">
+      <label for="event-select">Event</label>
+      <select id="event-select">
+        <option value="">Loading events…</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="checkpoint-input">Checkpoint Identifier</label>
+      <input type="text" id="checkpoint-input" placeholder="e.g. Main Gate">
+    </div>
+
+    <button id="start-btn" class="btn btn-primary" onclick="initSession()" disabled>
+      Begin Session
+    </button>
+
+    <!-- Surface load errors here -->
+    <div id="setup-error" class="feedback error" style="display:none;"></div>
+
+  </div>
+
+  <!-- ===== SCAN VIEW (hidden until session starts) ===== -->
+  <div id="scan-view" style="display:none;">
+
+    <!-- Active session context -->
+    <div class="context-panel">
+      <span>Event: <strong id="display-event"></strong></span>
+      <span>Checkpoint: <strong id="display-checkpoint"></strong></span>
+    </div>
+
+    <!-- Live counters -->
+    <div class="stats-row">
+      <div class="stat">
+        <span class="stat-label">In</span>
+        <span class="stat-value green"  id="cnt-success">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Dup</span>
+        <span class="stat-value orange" id="cnt-warning">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Err</span>
+        <span class="stat-value red"    id="cnt-error">0</span>
+      </div>
+    </div>
+
+    <!-- Camera -->
+    <button id="camera-btn" class="btn btn-secondary" onclick="toggleCamera()">
+      Start Camera
+    </button>
+    <div id="qr-reader"></div>
+
+    <!-- Manual / barcode input -->
+    <div class="field">
+      <label for="roll-input">Participant Roll Number</label>
+      <input type="text" id="roll-input" autocomplete="off" placeholder="Scan or type ID">
+    </div>
+
+    <button id="submit-btn" class="btn btn-primary" onclick="submitEntry()">
+      Submit Entry
+    </button>
+
+    <!-- Feedback -->
+    <div id="feedback-box" class="feedback neutral"></div>
+
+    <!-- Recent check-ins -->
+    <div class="recent">
+      <div class="recent-label">Recent Check-ins (Last 5)</div>
+      <ul id="recent-list" class="recent-list"></ul>
+    </div>
+
+    <a class="reset-link" onclick="location.reload()">Reset Session</a>
+
+  </div><!-- /scan-view -->
+
+</div><!-- /card -->
+
+<script>
+  // ============================================================
+  // STATE
+  // ============================================================
+  var state = {
+    events:      [],
+    activeEvent: null,
+    checkpoint:  "",
+    counts:      { success: 0, warning: 0, error: 0 },
+    recent:      [],           // array of roll-no strings
+    feedbackTimer: null,
+    audioCtx:    null,
+    scanner:     null,
+    cameraActive: false,
+    scanLock:    false,        // debounce: ignore scans while processing
+  };
+
+  // ============================================================
+  // INITIALISATION
+  // ============================================================
+  window.onload = function () {
+    setStatus("syncing", "● Loading…");
+
+    google.script.run
+      .withSuccessHandler(onConfigLoaded)
+      .withFailureHandler(onConfigFailed)
+      .getEventConfig();
+  };
+
+  function onConfigLoaded(events) {
+    if (!events || events.length === 0) {
+      onConfigFailed({ message: "No events found in Config sheet." });
+      return;
+    }
+
+    state.events = events;
+
+    var select = document.getElementById("event-select");
+    select.innerHTML = '<option value="">— Choose an event —</option>' +
+      events.map(function (e, i) {
+        return '<option value="' + i + '">' + e.eventName + '</option>';
+      }).join("");
+
+    document.getElementById("start-btn").disabled = false;
+    setStatus("online", "● Online");
+    console.log("[Init] Config loaded — " + events.length + " event(s).");
+  }
+
+  function onConfigFailed(err) {
+    var msg = (err && err.message) ? err.message : "Could not load event configuration.";
+    console.error("[Init] Config load failed:", msg);
+    setStatus("offline", "● Offline");
+
+    var el = document.getElementById("setup-error");
+    el.textContent = "Setup Error: " + msg;
+    el.style.display = "block";
+
+    var select = document.getElementById("event-select");
+    select.innerHTML = '<option value="">Error loading events</option>';
+  }
+
+  // ============================================================
+  // SESSION START
+  // ============================================================
+  function initSession() {
+    var eventIdx   = document.getElementById("event-select").value;
+    var checkpoint = document.getElementById("checkpoint-input").value.trim();
+
+    if (eventIdx === "") {
+      alert("Please select an event before starting.");
+      return;
+    }
+    if (checkpoint === "") {
+      alert("Please enter a Checkpoint Identifier before starting.");
+      return;
+    }
+
+    // Initialise AudioContext on user gesture (required by browsers)
+    try {
+      state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      console.warn("[initSession] AudioContext not available:", e.message);
+    }
+
+    state.activeEvent = state.events[eventIdx];
+    state.checkpoint  = checkpoint.toUpperCase();
+
+    document.getElementById("display-event").textContent      = state.activeEvent.eventName;
+    document.getElementById("display-checkpoint").textContent = state.checkpoint;
+
+    document.getElementById("setup-view").style.display = "none";
+    document.getElementById("scan-view").style.display  = "block";
+
+    document.getElementById("roll-input").focus();
+    console.log("[Session] Started — Event:", state.activeEvent.eventName, "| Checkpoint:", state.checkpoint);
+  }
+
+  // ============================================================
+  // CAMERA
+  // ============================================================
+  function toggleCamera() {
+    if (state.cameraActive) {
+      stopCamera();
+    } else {
+      startCamera();
+    }
+  }
+
+  function startCamera() {
+    var readerEl  = document.getElementById("qr-reader");
+    var cameraBtn = document.getElementById("camera-btn");
+
+    readerEl.style.display = "block";
+    setCameraBtn("Requesting permission…", true);
+
+    if (!state.scanner) {
+      state.scanner = new Html5Qrcode("qr-reader");
+    }
+
+    var config = { fps: 10, qrbox: { width: 240, height: 240 } };
+
+    // Go directly to start() — avoids getCameras() permission quirks in iframes
+    state.scanner.start(
+      { facingMode: "environment" },
+      config,
+      onQrCodeScanned,
+      function () {} // per-frame decode errors are expected; ignore them
+    )
+    .then(function () {
+      state.cameraActive = true;
+      setCameraBtn("Stop Camera", false);
+      console.log("[Camera] Started with rear-facing camera.");
+    })
+    .catch(function (rearErr) {
+      console.warn("[Camera] Rear camera failed, trying front camera:", rearErr);
+
+      state.scanner.start(
+        { facingMode: "user" },
+        config,
+        onQrCodeScanned,
+        function () {}
+      )
+      .then(function () {
+        state.cameraActive = true;
+        setCameraBtn("Stop Camera", false);
+        console.log("[Camera] Started with front-facing camera (fallback).");
+      })
+      .catch(function (frontErr) {
+        console.error("[Camera] Both camera modes failed:", frontErr);
+        readerEl.style.display = "none";
+        setCameraBtn("Start Camera", false);
+        showFeedback(
+          "Camera unavailable. Click the lock icon in your URL bar → Allow Camera, then try again.",
+          "error",
+          6000
+        );
+      });
+    });
+  }
+
+  function stopCamera() {
+    if (!state.scanner) return;
+    state.scanner.stop()
+      .then(function () {
+        state.cameraActive = false;
+        document.getElementById("qr-reader").style.display = "none";
+        setCameraBtn("Start Camera", false);
+        console.log("[Camera] Stopped.");
+      })
+      .catch(function (err) {
+        console.error("[Camera] Failed to stop cleanly:", err);
+      });
+  }
+
+  function setCameraBtn(label, disabled) {
+    var btn = document.getElementById("camera-btn");
+    btn.textContent = label;
+    btn.disabled    = disabled;
+  }
+
+  /** Triggered by the QR library when a code is decoded from the camera. */
+  function onQrCodeScanned(decodedText) {
+    if (state.scanLock) {
+      console.log("[Scanner] Scan ignored — previous entry still processing.");
+      return;
+    }
+    console.log("[Scanner] Code detected:", decodedText);
+    document.getElementById("roll-input").value = decodedText;
+    submitEntry();
+  }
+
+  // ============================================================
+  // ENTRY SUBMISSION
+  // ============================================================
+  function submitEntry() {
+    var rollInput = document.getElementById("roll-input");
+    var rollNo    = rollInput.value.trim().toUpperCase();
+
+    if (!rollNo) {
+      showFeedback("Please enter or scan a Roll Number.", "warning", 3000);
+      rollInput.focus();
+      return;
+    }
+
+    // Lock UI while waiting for backend
+    state.scanLock = true;
+    rollInput.disabled = true;
+    document.getElementById("submit-btn").disabled = true;
+    showFeedback("Verifying " + rollNo + "…", "neutral", 0);
+    setStatus("syncing", "● Syncing…");
+
+    console.log("[Submit] Sending to backend — Roll:", rollNo, "| Event:", state.activeEvent.eventName);
+
+    google.script.run
+      .withSuccessHandler(function (response) {
+        setStatus("online", "● Online");
+        console.log("[Submit] Response received:", JSON.stringify(response));
+        handleServerResponse(rollNo, response);
+        resetInput();
+      })
+      .withFailureHandler(function (err) {
+        var msg = (err && err.message) ? err.message : "Unknown network or server error.";
+        console.error("[Submit] Server call failed:", msg);
+        setStatus("offline", "● Connection Error");
+        handleServerResponse(rollNo, {
+          success: false,
+          message: "Connection failed — " + msg,
+          type:    "error",
+        });
+        resetInput();
+      })
+      .processCheckIn(rollNo, state.activeEvent, state.checkpoint);
+  }
+
+  // ============================================================
+  // RESPONSE HANDLING
+  // ============================================================
+  function handleServerResponse(rollNo, response) {
+    var type = response.type || "error";
+    playTone(type);
+    showFeedback(response.message, type, type === "success" ? 2000 : 4000);
+
+    state.counts[type] = (state.counts[type] || 0) + 1;
+    document.getElementById("cnt-success").textContent = state.counts.success;
+    document.getElementById("cnt-warning").textContent = state.counts.warning;
+    document.getElementById("cnt-error").textContent   = state.counts.error;
+
+    if (type === "success") {
+      state.recent.unshift(rollNo);
+      if (state.recent.length > 5) state.recent.pop();
+      renderRecentList();
+    }
+  }
+
+  function renderRecentList() {
+    var ul = document.getElementById("recent-list");
+    ul.innerHTML = state.recent.map(function (id) {
+      return "<li>✓ " + id + "</li>";
+    }).join("");
+  }
+
+  // ============================================================
+  // UI HELPERS
+  // ============================================================
+  function showFeedback(message, type, durationMs) {
+    var box = document.getElementById("feedback-box");
+    clearTimeout(state.feedbackTimer);
+
+    box.textContent = message;
+    box.className   = "feedback " + type;
+    box.style.display = "block";
+
+    if (durationMs > 0) {
+      state.feedbackTimer = setTimeout(function () {
+        box.style.display = "none";
+      }, durationMs);
+    }
+  }
+
+  function setStatus(cssClass, label) {
+    var el = document.getElementById("sys-status");
+    el.className   = cssClass;
+    el.textContent = label;
+  }
+
+  function resetInput() {
+    var rollInput = document.getElementById("roll-input");
+    rollInput.value    = "";
+    rollInput.disabled = false;
+    document.getElementById("submit-btn").disabled = false;
+    rollInput.focus();
+    // Release scan lock after a short delay to avoid double-scans
+    setTimeout(function () { state.scanLock = false; }, 1500);
+  }
+
+  // ============================================================
+  // AUDIO FEEDBACK
+  // ============================================================
+  function playTone(type) {
+    if (!state.audioCtx) return;
+    try {
+      if (state.audioCtx.state === "suspended") state.audioCtx.resume();
+
+      var osc  = state.audioCtx.createOscillator();
+      var gain = state.audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(state.audioCtx.destination);
+
+      var now = state.audioCtx.currentTime;
+
+      if (type === "success") {
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, now);
+        gain.gain.setValueAtTime(0.08, now);
+        osc.start(now); osc.stop(now + 0.15);
+      } else if (type === "warning") {
+        osc.type = "square";
+        osc.frequency.setValueAtTime(440, now);
+        gain.gain.setValueAtTime(0.05, now);
+        osc.start(now); osc.stop(now + 0.25);
+      } else {
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(220, now);
+        gain.gain.setValueAtTime(0.08, now);
+        osc.start(now); osc.stop(now + 0.4);
+      }
+    } catch (e) {
+      console.warn("[Audio] Tone failed:", e.message);
+    }
+  }
+
+  // ============================================================
+  // KEYBOARD: Enter key submits
+  // ============================================================
+  document.getElementById("roll-input").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitEntry();
+    }
+  });
+</script>
+</body>
+</html>
